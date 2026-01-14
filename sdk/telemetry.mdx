@@ -1,0 +1,274 @@
+---
+title: "Telemetry"
+description: "Understanding the data captured by the Asymetry SDK"
+---
+
+# Telemetry
+
+The Asymetry SDK captures comprehensive telemetry for every LLM call and custom trace. This page explains the data model and what gets sent to the Asymetry API.
+
+## Data Types
+
+Every captured interaction generates one or more of these payload types:
+
+<CardGroup cols={2}>
+  <Card title="LLM Requests" icon="message">
+    Full request/response data for LLM calls
+  </Card>
+  <Card title="Token Usage" icon="coins">
+    Prompt, completion, and total token counts
+  </Card>
+  <Card title="Errors" icon="triangle-exclamation">
+    Exception details with stack traces
+  </Card>
+  <Card title="Trace Spans" icon="sitemap">
+    OpenTelemetry spans for custom code
+  </Card>
+</CardGroup>
+
+---
+
+## LLM Request Data
+
+For every LLM API call, we capture:
+
+| Field | Description |
+| --- | --- |
+| `provider` | `openai` or `anthropic` |
+| `model` | Model identifier (e.g., `gpt-4o`, `claude-3-5-sonnet`) |
+| `timestamp` | UTC timestamp of the request |
+| `latency_ms` | End-to-end latency in milliseconds |
+| `finish_reason` | Why generation stopped: `stop`, `length`, `tool_calls`, etc. |
+| `messages` | Full input messages/prompts |
+| `response` | Complete model output |
+| `request_params` | Parameters like `temperature`, `max_tokens`, etc. |
+| `trace_id` | OpenTelemetry trace ID for correlation |
+| `span_id` | Unique span identifier |
+| `parent_span_id` | Parent span (if nested) |
+
+### Example LLM Request Payload
+
+```json
+{
+  "provider": "openai",
+  "model": "gpt-4o-mini",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "latency_ms": 1250,
+  "finish_reason": "stop",
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "What is the capital of France?"}
+  ],
+  "response": [
+    {"role": "assistant", "content": "The capital of France is Paris."}
+  ],
+  "request_params": {
+    "temperature": 0.7,
+    "max_tokens": 100
+  },
+  "trace_id": "abc123...",
+  "span_id": "def456..."
+}
+```
+
+---
+
+## Token Usage
+
+Token counts are captured for cost tracking and quota management:
+
+| Field | Description |
+| --- | --- |
+| `prompt_tokens` | Tokens in the input/prompt |
+| `completion_tokens` | Tokens in the model output |
+| `total_tokens` | Sum of prompt + completion |
+| `estimated` | `true` if tokens were estimated vs. actual |
+
+### Token Counting Methods
+
+<Tabs>
+  <Tab title="Actual (Preferred)">
+    When the provider returns usage data, we use the actual values:
+    
+    ```python
+    # OpenAI returns usage in the response
+    response.usage.prompt_tokens  # e.g., 52
+    response.usage.completion_tokens  # e.g., 18
+    ```
+  </Tab>
+  <Tab title="tiktoken Estimate">
+    If `tiktoken` is installed, we use it for accurate estimates:
+    
+    ```bash
+    pip install tiktoken
+    ```
+    
+    This gives near-exact token counts for OpenAI models.
+  </Tab>
+  <Tab title="Character Fallback">
+    Without tiktoken, we estimate based on character count:
+    
+    ```
+    estimated_tokens ≈ len(text) / 4
+    ```
+    
+    This is less accurate but works as a fallback.
+  </Tab>
+</Tabs>
+
+---
+
+## Error Data
+
+When an exception occurs during an LLM call:
+
+| Field | Description |
+| --- | --- |
+| `error_type` | Python exception class name |
+| `error_code` | Error code (if available) |
+| `error_message` | Exception message |
+| `stack_trace` | Truncated stack trace |
+| `timestamp` | When the error occurred |
+
+### Example Error Payload
+
+```json
+{
+  "error_type": "openai.RateLimitError",
+  "error_code": "rate_limit_exceeded",
+  "error_message": "You exceeded your current quota...",
+  "stack_trace": "Traceback (most recent call last):\n  File ...",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "trace_id": "abc123...",
+  "span_id": "def456..."
+}
+```
+
+---
+
+## Trace Span Data
+
+Custom traces (via `@observe` or `trace_context`) generate OpenTelemetry spans:
+
+| Field | Description |
+| --- | --- |
+| `name` | Span name |
+| `trace_id` | Trace identifier (shared by related spans) |
+| `span_id` | Unique span identifier |
+| `parent_span_id` | Parent span for nesting |
+| `start_time` | Span start timestamp (ns) |
+| `end_time` | Span end timestamp (ns) |
+| `duration_ms` | Computed duration |
+| `status` | `OK`, `ERROR`, or `UNSET` |
+| `kind` | Span kind: `INTERNAL`, `CLIENT`, `SERVER`, etc. |
+| `attributes` | Custom attributes dict |
+| `events` | List of timestamped events |
+
+### Example Trace Span Payload
+
+```json
+{
+  "name": "process_order",
+  "trace_id": "abc123...",
+  "span_id": "ghi789...",
+  "parent_span_id": null,
+  "start_time": 1705312200000000000,
+  "end_time": 1705312200500000000,
+  "duration_ms": 500,
+  "status": "OK",
+  "kind": "INTERNAL",
+  "attributes": {
+    "span_type": "workflow",
+    "order_id": "ORD-123",
+    "tier": "premium"
+  },
+  "events": [
+    {
+      "name": "validation_complete",
+      "timestamp": 1705312200100000000,
+      "attributes": {"valid": true}
+    }
+  ]
+}
+```
+
+---
+
+## Captured Attributes
+
+### Automatic Attributes
+
+These are automatically added to LLM spans:
+
+| Attribute | Description |
+| --- | --- |
+| `llm.provider` | Provider name |
+| `llm.model` | Model identifier |
+| `llm.latency_ms` | Request latency |
+| `llm.finish_reason` | Generation stop reason |
+| `llm.token_usage.prompt` | Prompt tokens |
+| `llm.token_usage.completion` | Completion tokens |
+| `llm.token_usage.total` | Total tokens |
+
+### Custom Attributes
+
+Add your own via decorator or helper:
+
+```python
+@observe(attributes={"customer_id": "C123", "feature": "chat"})
+def handle_chat():
+    add_span_attribute("message_count", 5)
+    pass
+```
+
+---
+
+## Data Privacy
+
+<Warning>
+By default, full prompts and responses are captured. For sensitive applications, consider:
+
+1. **Sanitization** - Preprocess input/output before LLM calls
+2. **Disable capture** - Configure client-side filtering (coming soon)
+3. **Data retention** - Configure retention policies in your dashboard
+</Warning>
+
+### What's NOT Captured
+
+- API keys (we detect and redact these)
+- System environment variables (except Asymetry config)
+- File system contents
+- Network credentials
+
+---
+
+## Data Export Format
+
+Telemetry is batched and sent as JSON to the ingest API:
+
+```json
+{
+  "batch": [
+    {"type": "llm_request", "data": {...}},
+    {"type": "token_usage", "data": {...}},
+    {"type": "trace_span", "data": {...}}
+  ],
+  "metadata": {
+    "sdk_version": "0.1.0",
+    "timestamp": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Security Analysis" icon="shield" href="/api-reference/security-analysis">
+    How we analyze traces for security
+  </Card>
+  <Card title="Dashboard" icon="chart-bar" href="https://asymetry.co">
+    View your telemetry data
+  </Card>
+</CardGroup>

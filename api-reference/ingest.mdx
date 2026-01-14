@@ -1,0 +1,268 @@
+---
+title: "Ingest API"
+description: "Send telemetry data to Asymetry"
+sidebarTitle: "Ingest"
+---
+
+# Ingest API
+
+The Ingest API receives telemetry data from the Asymetry SDK. While you typically won't call this directly (the SDK handles it), this reference is useful for custom integrations.
+
+## Endpoint
+
+```
+POST https://api.asymetry.co/v1/ingest
+```
+
+---
+
+## Authentication
+
+Include your API key in the `Authorization` header:
+
+```bash
+Authorization: Bearer sk_prod_...
+```
+
+---
+
+## Request Body
+
+The request body contains a batch of telemetry items:
+
+```json
+{
+  "batch": [
+    {
+      "type": "llm_request",
+      "data": { /* LLM request data */ }
+    },
+    {
+      "type": "trace_span",
+      "data": { /* Trace span data */ }
+    }
+  ],
+  "metadata": {
+    "sdk_version": "0.1.0",
+    "timestamp": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+### Batch Item Types
+
+| Type | Description |
+| --- | --- |
+| `llm_request` | LLM API call data |
+| `token_usage` | Token count data |
+| `error` | Error information |
+| `trace_span` | OpenTelemetry span |
+
+---
+
+## LLM Request Schema
+
+```json
+{
+  "type": "llm_request",
+  "data": {
+    "provider": "openai",
+    "model": "gpt-4o",
+    "timestamp": "2024-01-15T10:30:00Z",
+    "latency_ms": 1250,
+    "finish_reason": "stop",
+    "messages": [
+      {"role": "system", "content": "You are a helpful assistant."},
+      {"role": "user", "content": "Hello!"}
+    ],
+    "response": [
+      {"role": "assistant", "content": "Hi there! How can I help you today?"}
+    ],
+    "request_params": {
+      "temperature": 0.7,
+      "max_tokens": 100
+    },
+    "trace_id": "abc123...",
+    "span_id": "def456...",
+    "parent_span_id": null
+  }
+}
+```
+
+### Fields
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `provider` | string | ✓ | `openai` or `anthropic` |
+| `model` | string | ✓ | Model identifier |
+| `timestamp` | string | ✓ | ISO 8601 timestamp |
+| `latency_ms` | number | ✓ | Request duration in ms |
+| `finish_reason` | string | | `stop`, `length`, `tool_calls`, etc. |
+| `messages` | array | ✓ | Input messages |
+| `response` | array | ✓ | Output messages |
+| `request_params` | object | | Additional parameters |
+| `trace_id` | string | | OpenTelemetry trace ID |
+| `span_id` | string | | Unique span ID |
+| `parent_span_id` | string | | Parent span ID (if nested) |
+
+---
+
+## Token Usage Schema
+
+```json
+{
+  "type": "token_usage",
+  "data": {
+    "prompt_tokens": 52,
+    "completion_tokens": 128,
+    "total_tokens": 180,
+    "estimated": false,
+    "span_id": "def456..."
+  }
+}
+```
+
+### Fields
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `prompt_tokens` | number | ✓ | Input token count |
+| `completion_tokens` | number | ✓ | Output token count |
+| `total_tokens` | number | ✓ | Total token count |
+| `estimated` | boolean | | `true` if tokens were estimated |
+| `span_id` | string | ✓ | Associated span |
+
+---
+
+## Trace Span Schema
+
+```json
+{
+  "type": "trace_span",
+  "data": {
+    "name": "process_order",
+    "trace_id": "abc123...",
+    "span_id": "ghi789...",
+    "parent_span_id": "def456...",
+    "start_time": 1705312200000000000,
+    "end_time": 1705312200500000000,
+    "status": "OK",
+    "kind": "INTERNAL",
+    "attributes": {
+      "order_id": "ORD-123",
+      "tier": "premium"
+    },
+    "events": [
+      {
+        "name": "validation_complete",
+        "timestamp": 1705312200100000000,
+        "attributes": {"valid": true}
+      }
+    ]
+  }
+}
+```
+
+---
+
+## Response
+
+### Success Response
+
+```json
+{
+  "status": "ok",
+  "accepted": 5,
+  "timestamp": "2024-01-15T10:30:01Z"
+}
+```
+
+| Field | Description |
+| --- | --- |
+| `status` | `ok` on success |
+| `accepted` | Number of items accepted |
+| `timestamp` | Server timestamp |
+
+### Error Response
+
+```json
+{
+  "error": {
+    "code": "invalid_request",
+    "message": "Invalid batch item at index 2: missing 'provider' field",
+    "status": 400
+  }
+}
+```
+
+---
+
+## Example Request
+
+```bash
+curl -X POST https://api.asymetry.co/v1/ingest \
+  -H "Authorization: Bearer sk_prod_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "batch": [
+      {
+        "type": "llm_request",
+        "data": {
+          "provider": "openai",
+          "model": "gpt-4o-mini",
+          "timestamp": "2024-01-15T10:30:00Z",
+          "latency_ms": 850,
+          "finish_reason": "stop",
+          "messages": [
+            {"role": "user", "content": "What is 2+2?"}
+          ],
+          "response": [
+            {"role": "assistant", "content": "2+2 equals 4."}
+          ],
+          "trace_id": "a1b2c3d4e5f6",
+          "span_id": "span123"
+        }
+      },
+      {
+        "type": "token_usage",
+        "data": {
+          "prompt_tokens": 12,
+          "completion_tokens": 8,
+          "total_tokens": 20,
+          "estimated": false,
+          "span_id": "span123"
+        }
+      }
+    ],
+    "metadata": {
+      "sdk_version": "0.1.0",
+      "timestamp": "2024-01-15T10:30:01Z"
+    }
+  }'
+```
+
+---
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Batch your requests">
+    Send multiple items in a single request rather than one item per request. The SDK batches by default (100 items or 5 seconds).
+  </Accordion>
+  
+  <Accordion title="Implement retry logic">
+    On 5xx errors or timeouts, retry with exponential backoff. The SDK handles this automatically.
+  </Accordion>
+  
+  <Accordion title="Use the SDK when possible">
+    The SDK provides proper batching, retry logic, queue management, and graceful shutdown. Only call the API directly if you need a custom integration.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Next Steps
+
+<Card title="Security Analysis" icon="shield" href="/api-reference/security-analysis">
+  Analyze traces for security risks
+</Card>

@@ -1,0 +1,266 @@
+---
+title: "OpenAI Integration"
+description: "Automatic instrumentation for OpenAI API calls"
+sidebarTitle: "OpenAI"
+---
+
+# OpenAI Integration
+
+The Asymetry SDK automatically instruments OpenAI API calls with zero code changes. Just initialize the SDK and your calls are tracked.
+
+## Quick Start
+
+```python
+from asymetry import init_observability
+import openai
+
+init_observability()
+
+client = openai.OpenAI()
+
+response = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+# Automatically tracked! ✓
+```
+
+---
+
+## Supported APIs
+
+| API | Method | Status |
+| --- | --- | --- |
+| Chat Completions | `client.chat.completions.create()` | ✅ Full support |
+| Chat Completions (Streaming) | `stream=True` | ⚠️ Partial support |
+
+<Info>
+Streaming support captures the request and aggregated response, but chunk-level telemetry is still in development.
+</Info>
+
+---
+
+## Chat Completions
+
+All parameters are captured automatically:
+
+```python
+response = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "What is Python?"}
+    ],
+    temperature=0.7,
+    max_tokens=500,
+    top_p=1.0,
+    frequency_penalty=0,
+    presence_penalty=0,
+)
+```
+
+### Captured Data
+
+| Field | Description |
+| --- | --- |
+| `model` | Model identifier (`gpt-4o`, `gpt-4o-mini`, etc.) |
+| `messages` | Full conversation history |
+| `response` | Complete assistant response |
+| `finish_reason` | Why generation stopped |
+| `latency_ms` | Request duration |
+| `temperature` | Sampling temperature |
+| `max_tokens` | Maximum output tokens |
+| All other params | `top_p`, `frequency_penalty`, etc. |
+
+---
+
+## Token Usage
+
+Token counts are captured from the API response:
+
+```python
+response = client.chat.completions.create(...)
+
+# API returns:
+# response.usage.prompt_tokens = 52
+# response.usage.completion_tokens = 128
+# response.usage.total_tokens = 180
+```
+
+For the most accurate token counts, the SDK uses the values returned by OpenAI. If `tiktoken` is installed, it's used for validation and streaming estimates.
+
+---
+
+## Function/Tool Calling
+
+Tool calls are fully captured:
+
+```python
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get the current weather",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string"}
+                },
+                "required": ["location"]
+            }
+        }
+    }
+]
+
+response = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "What's the weather in Paris?"}],
+    tools=tools,
+    tool_choice="auto"
+)
+```
+
+### Captured Tool Data
+
+- Tool definitions passed in the request
+- Tool calls made by the model
+- Function names and arguments
+- Follow-up messages with tool results
+
+---
+
+## Streaming
+
+Streaming calls are supported with partial telemetry:
+
+```python
+stream = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "Tell me a story"}],
+    stream=True
+)
+
+for chunk in stream:
+    print(chunk.choices[0].delta.content or "", end="")
+```
+
+<Warning>
+**Current Limitations:**
+- Token usage is estimated (OpenAI doesn't return usage for streaming)
+- Full response is reconstructed from chunks for capture
+- Chunk-level timing not yet available
+</Warning>
+
+---
+
+## Error Handling
+
+Errors are automatically captured with full context:
+
+```python
+try:
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": "..."}],
+        max_tokens=100000  # Too high!
+    )
+except openai.BadRequestError as e:
+    # Error is automatically tracked
+    pass
+```
+
+### Captured Error Data
+
+| Field | Description |
+| --- | --- |
+| `error_type` | `openai.BadRequestError`, `openai.RateLimitError`, etc. |
+| `error_code` | Error code from the API |
+| `error_message` | Human-readable error message |
+| `stack_trace` | Truncated Python stack trace |
+
+---
+
+## Multiple Clients
+
+Multiple OpenAI clients are all instrumented:
+
+```python
+from asymetry import init_observability
+import openai
+
+init_observability()
+
+# All clients are tracked
+default_client = openai.OpenAI()
+custom_client = openai.OpenAI(api_key="sk_different...")
+
+# Both calls are captured
+response1 = default_client.chat.completions.create(...)
+response2 = custom_client.chat.completions.create(...)
+```
+
+---
+
+## Combining with Custom Tracing
+
+Wrap OpenAI calls in custom spans for context:
+
+```python
+from asymetry import init_observability, observe, trace_context
+import openai
+
+init_observability()
+client = openai.OpenAI()
+
+@observe(span_type="agent")
+def customer_support_agent(query: str):
+    with trace_context("classify_intent"):
+        intent = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": f"Classify: {query}"}]
+        )
+    
+    with trace_context("generate_response"):
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": query}]
+        )
+    
+    return response.choices[0].message.content
+```
+
+The trace shows:
+
+```
+customer_support_agent (agent)
+├── classify_intent
+│   └── llm.request (gpt-4o-mini)
+└── generate_response
+    └── llm.request (gpt-4o)
+```
+
+---
+
+## Configuration
+
+No OpenAI-specific configuration is needed. The SDK instruments all OpenAI clients automatically after `init_observability()` is called.
+
+To disable instrumentation temporarily:
+
+```python
+init_observability(enabled=False)
+```
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Anthropic Integration" icon="message" href="/providers/anthropic">
+    Using Asymetry with Anthropic Claude
+  </Card>
+  <Card title="Multi-LLM Guide" icon="layer-group" href="/guides/multi-llm">
+    Using multiple providers together
+  </Card>
+</CardGroup>

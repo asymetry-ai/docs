@@ -1,0 +1,133 @@
+---
+title: "SDK Overview"
+description: "Understanding how the Asymetry SDK works"
+---
+
+# SDK Overview
+
+The Asymetry SDK provides automatic observability for your LLM applications with zero code changes to your existing logic.
+
+## Architecture
+
+```
+Your App (OpenAI / Anthropic / custom code)
+        ↓ monkey-patched clients & decorators
+Asymetry Instrumentation Layer
+        ↓
+Thread-safe Queue (backpressure & drop-old)
+        ↓
+Background Exporter Thread
+        ↓ async HTTP (httpx)
+Asymetry Ingest API (batch + retry)
+```
+
+---
+
+## How It Works
+
+### Automatic Instrumentation
+
+When you call `init_observability()`, the SDK:
+
+1. **Patches OpenAI** – Wraps `openai.chat.completions.create()` to capture all request/response data
+2. **Patches Anthropic** – Wraps `anthropic.messages.create()` similarly
+3. **Starts the exporter** – A background thread that batches and sends telemetry to Asymetry
+
+```python
+from asymetry import init_observability
+
+init_observability()  # Patches happen here
+
+# All subsequent LLM calls are automatically tracked
+```
+
+### Custom Tracing
+
+For your own business logic, use the `@observe` decorator or `trace_context`:
+
+```python
+from asymetry import observe, trace_context
+
+@observe(name="process_order", attributes={"tier": "premium"})
+def process_order(order_id: str):
+    # Your business logic
+    with trace_context("validate_payment"):
+        # Nested span
+        pass
+```
+
+---
+
+## Key Guarantees
+
+<CardGroup cols={2}>
+  <Card title="Non-blocking" icon="bolt">
+    SDK calls enqueue telemetry without touching the network path. Your app stays fast.
+  </Card>
+  <Card title="Resilient" icon="shield">
+    Time or size-based flush, exponential backoff, and graceful shutdown via `atexit`.
+  </Card>
+  <Card title="Queue Safety" icon="database">
+    Bounded queue protects your app. Oldest spans are dropped if backpressure persists.
+  </Card>
+  <Card title="OpenTelemetry Native" icon="layer-group">
+    Built on OpenTelemetry for seamless integration with your existing observability stack.
+  </Card>
+</CardGroup>
+
+---
+
+## What Gets Captured
+
+Every LLM call generates rich telemetry:
+
+| Data Type | Description |
+| --- | --- |
+| **LLM Request** | Provider, model, timestamp, latency, finish reason, full messages, response, request params |
+| **Token Usage** | Prompt tokens, completion tokens, total tokens (real or estimated) |
+| **Errors** | Exception type, message, and truncated stack trace |
+| **Trace Spans** | OpenTelemetry spans with attributes, events, parent/child relationships |
+
+---
+
+## Telemetry Flow
+
+<Steps>
+  <Step title="Capture">
+    When an LLM call completes, the instrumentation layer extracts telemetry data
+  </Step>
+  <Step title="Enqueue">
+    Data is added to a thread-safe, bounded queue (default: 10,000 items max)
+  </Step>
+  <Step title="Batch">
+    Background thread collects items from the queue (default: 100 per batch or every 5 seconds)
+  </Step>
+  <Step title="Export">
+    Batched telemetry is sent to `https://api.asymetry.co/v1/ingest` with retry logic
+  </Step>
+</Steps>
+
+---
+
+## SDK Components
+
+| Component | File | Purpose |
+| --- | --- | --- |
+| `init_observability()` | `main.py` | Entry point to initialize instrumentation |
+| Instrumentation | `instrumentation.py` | Monkey patches for OpenAI and Anthropic |
+| Tracing | `tracing.py` | Custom tracing decorators and context managers |
+| Exporter | `exporter.py` | Background thread for batching and sending data |
+| Config | `config.py` | Configuration management from environment |
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Initialization" icon="play" href="/sdk/initialization">
+    Learn about `init_observability()` parameters
+  </Card>
+  <Card title="Configuration" icon="gear" href="/sdk/configuration">
+    All environment variables and options
+  </Card>
+</CardGroup>

@@ -1,0 +1,323 @@
+---
+title: "Multi-LLM Support"
+description: "Use OpenAI and Anthropic together with unified observability"
+sidebarTitle: "Multi-LLM"
+---
+
+# Multi-LLM Support
+
+The Asymetry SDK supports multiple LLM providers simultaneously with a single initialization call. Track OpenAI and Anthropic usage in the same dashboard.
+
+## Quick Start
+
+```python
+from asymetry import init_observability
+import openai
+import anthropic
+
+# Single init for all providers
+init_observability()
+
+# Both clients are instrumented
+openai_client = openai.OpenAI()
+anthropic_client = anthropic.Anthropic()
+
+# OpenAI call
+gpt_response = openai_client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "Hello from GPT!"}]
+)
+
+# Anthropic call
+claude_response = anthropic_client.messages.create(
+    model="claude-3-5-haiku-latest",
+    max_tokens=100,
+    messages=[{"role": "user", "content": "Hello from Claude!"}]
+)
+
+# Both tracked automatically ✓
+```
+
+---
+
+## Why Multi-LLM?
+
+<CardGroup cols={2}>
+  <Card title="Compare Models" icon="scale-balanced">
+    Test the same prompt across GPT and Claude to compare responses
+  </Card>
+  <Card title="Fallback Chains" icon="arrows-rotate">
+    Use one model as primary, another as fallback
+  </Card>
+  <Card title="Specialized Models" icon="wand-magic-sparkles">
+    Use different models for different tasks
+  </Card>
+  <Card title="Cost Optimization" icon="dollar-sign">
+    Route to cheaper models when appropriate
+  </Card>
+</CardGroup>
+
+---
+
+## Model Comparison Example
+
+Compare responses from different models:
+
+```python
+from asymetry import init_observability, observe
+import openai
+import anthropic
+
+init_observability()
+
+openai_client = openai.OpenAI()
+anthropic_client = anthropic.Anthropic()
+
+@observe(name="model_comparison", span_type="workflow")
+def compare_models(prompt: str) -> dict:
+    """Compare responses from GPT-4 and Claude."""
+    
+    # Get GPT response
+    gpt_response = openai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7,
+    )
+    
+    # Get Claude response
+    claude_response = anthropic_client.messages.create(
+        model="claude-3-5-sonnet-latest",
+        max_tokens=500,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    
+    return {
+        "gpt4": gpt_response.choices[0].message.content,
+        "claude": claude_response.content[0].text,
+    }
+
+# Compare
+results = compare_models("Explain quantum entanglement in simple terms.")
+print("GPT-4:", results["gpt4"][:200])
+print()
+print("Claude:", results["claude"][:200])
+```
+
+In your dashboard, you'll see both LLM calls in the same trace with their respective metrics.
+
+---
+
+## Fallback Pattern
+
+Use Anthropic as a fallback when OpenAI fails:
+
+```python
+from asymetry import init_observability, observe, add_span_attribute
+import openai
+import anthropic
+
+init_observability()
+
+openai_client = openai.OpenAI()
+anthropic_client = anthropic.Anthropic()
+
+@observe(name="llm_with_fallback")
+def resilient_generate(prompt: str) -> str:
+    """Try OpenAI first, fall back to Anthropic."""
+    
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        add_span_attribute("provider_used", "openai")
+        return response.choices[0].message.content
+        
+    except Exception as e:
+        # OpenAI failed, try Anthropic
+        add_span_attribute("openai_error", str(e))
+        
+        response = anthropic_client.messages.create(
+            model="claude-3-5-sonnet-latest",
+            max_tokens=1000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        add_span_attribute("provider_used", "anthropic")
+        return response.content[0].text
+
+# Use it
+result = resilient_generate("What is machine learning?")
+```
+
+---
+
+## Task-Based Routing
+
+Use different models for different tasks:
+
+```python
+from asymetry import init_observability, observe, trace_context
+import openai
+import anthropic
+
+init_observability()
+
+openai_client = openai.OpenAI()
+anthropic_client = anthropic.Anthropic()
+
+@observe(name="smart_router", span_type="agent")
+def smart_assistant(task: str, content: str) -> str:
+    """Route to the best model for each task."""
+    
+    if task == "code":
+        # Claude excels at code
+        with trace_context("code_generation", attributes={"model": "claude"}):
+            response = anthropic_client.messages.create(
+                model="claude-3-5-sonnet-latest",
+                max_tokens=2000,
+                messages=[{"role": "user", "content": content}],
+            )
+            return response.content[0].text
+    
+    elif task == "creative":
+        # GPT-4 for creative writing
+        with trace_context("creative_writing", attributes={"model": "gpt-4o"}):
+            response = openai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": content}],
+                temperature=0.9,
+            )
+            return response.choices[0].message.content
+    
+    else:
+        # Use mini model for simple tasks
+        with trace_context("simple_task", attributes={"model": "gpt-4o-mini"}):
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": content}],
+            )
+            return response.choices[0].message.content
+
+# Route based on task
+code = smart_assistant("code", "Write a Python function to reverse a string")
+story = smart_assistant("creative", "Write a haiku about coding")
+answer = smart_assistant("qa", "What is 2+2?")
+```
+
+---
+
+## Chain Multiple Models
+
+Use models in sequence:
+
+```python
+from asymetry import init_observability, observe, trace_context
+import openai
+import anthropic
+
+init_observability()
+
+openai_client = openai.OpenAI()
+anthropic_client = anthropic.Anthropic()
+
+@observe(name="review_chain", span_type="workflow")
+def draft_and_review(topic: str) -> dict:
+    """GPT writes, Claude reviews."""
+    
+    # Step 1: GPT creates initial draft
+    with trace_context("draft", attributes={"model": "gpt-4o"}):
+        draft = openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "Write a concise explanation."},
+                {"role": "user", "content": f"Explain: {topic}"}
+            ],
+        ).choices[0].message.content
+    
+    # Step 2: Claude reviews and improves
+    with trace_context("review", attributes={"model": "claude"}):
+        review = anthropic_client.messages.create(
+            model="claude-3-5-sonnet-latest",
+            max_tokens=1000,
+            messages=[
+                {"role": "user", "content": f"""Review and improve this explanation:
+
+{draft}
+
+Provide your improved version."""}
+            ],
+        ).content[0].text
+    
+    return {"draft": draft, "final": review}
+
+result = draft_and_review("REST APIs")
+print("Original:", result["draft"][:200])
+print()
+print("Improved:", result["final"][:200])
+```
+
+---
+
+## Cost Tracking
+
+Track costs across providers:
+
+```python
+from asymetry import observe, add_span_attribute
+
+# Approximate pricing per 1K tokens (check latest pricing)
+PRICING = {
+    "gpt-4o": {"input": 0.005, "output": 0.015},
+    "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
+    "claude-3-5-sonnet-latest": {"input": 0.003, "output": 0.015},
+    "claude-3-5-haiku-latest": {"input": 0.001, "output": 0.005},
+}
+
+@observe()
+def tracked_openai_call(model: str, messages: list):
+    response = openai_client.chat.completions.create(
+        model=model,
+        messages=messages,
+    )
+    
+    # Calculate cost
+    usage = response.usage
+    cost = (
+        (usage.prompt_tokens / 1000) * PRICING[model]["input"] +
+        (usage.completion_tokens / 1000) * PRICING[model]["output"]
+    )
+    
+    add_span_attribute("estimated_cost_usd", round(cost, 6))
+    add_span_attribute("model", model)
+    
+    return response
+```
+
+---
+
+## Dashboard View
+
+In the Asymetry dashboard, multi-provider traces show:
+
+| Column | Description |
+| --- | --- |
+| Provider | `openai` or `anthropic` |
+| Model | Specific model used |
+| Tokens | Input/output token counts |
+| Latency | Response time |
+| Cost | Estimated cost (if tracked) |
+
+Filter by provider to analyze usage patterns.
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Custom Tracing" icon="code" href="/guides/custom-tracing">
+    Advanced tracing patterns
+  </Card>
+  <Card title="Agentic Workflows" icon="robot" href="/guides/agentic-workflows">
+    Multi-step AI agents
+  </Card>
+</CardGroup>

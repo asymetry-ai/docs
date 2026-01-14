@@ -1,80 +1,158 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Get started with Asymetry in under 5 minutes"
 ---
 
-## Get started in three steps
+# Quickstart
 
-Get your documentation site running locally and make your first customization.
+Get your LLM application instrumented with full observability in just a few steps.
 
-### Step 1: Set up your local environment
+## Prerequisites
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+- Python 3.10 or higher
+- An Asymetry account ([sign up here](https://asymetry.co))
+- OpenAI or Anthropic API key
 
-### Step 2: Deploy your changes
+---
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+## Step 1: Install the SDK
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+<CodeGroup>
+```bash pip
+pip install asymetry
+```
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+```bash poetry
+poetry add asymetry
+```
+</CodeGroup>
 
-### Step 3: Go live
+<Tip>
+For accurate token counting, also install `tiktoken`:
+```bash
+pip install tiktoken
+```
+</Tip>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+---
 
-## Next steps
+## Step 2: Set Your API Key
 
-Now that you have your docs running, explore these key features:
+Get your API key from the [Asymetry Dashboard](https://asymetry.co) and set it as an environment variable:
+
+```bash
+export ASYMETRY_API_KEY="sk_..."
+```
+
+Or create a `.env` file in your project root:
+
+```bash .env
+ASYMETRY_API_KEY=sk_...
+ASYMETRY_ENABLED=true
+```
+
+---
+
+## Step 3: Initialize Observability
+
+Add a single line at the start of your application:
+
+```python
+from asymetry import init_observability
+
+init_observability()
+```
+
+That's it! All your OpenAI and Anthropic calls are now automatically tracked.
+
+---
+
+## Step 4: Make LLM Calls
+
+Use your LLM client normally – Asymetry captures everything automatically:
+
+<CodeGroup>
+```python OpenAI
+from asymetry import init_observability
+import openai
+
+init_observability()
+
+client = openai.OpenAI()
+
+response = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "What is the capital of France?"}],
+    temperature=0.7,
+)
+
+print(response.choices[0].message.content)
+# → "The capital of France is Paris."
+# Automatically tracked: latency, tokens, prompt, response ✓
+```
+
+```python Anthropic
+from asymetry import init_observability
+import anthropic
+
+init_observability()
+
+client = anthropic.Anthropic()
+
+response = client.messages.create(
+    model="claude-3-5-haiku-latest",
+    max_tokens=200,
+    messages=[{"role": "user", "content": "What is the capital of France?"}],
+)
+
+print(response.content[0].text)
+# Automatically tracked ✓
+```
+</CodeGroup>
+
+---
+
+## Step 5: View Your Traces
+
+Head to the [Asymetry Dashboard](https://asymetry.co) to see your traces:
+
+- **Request/Response**: Full prompts and completions
+- **Token Usage**: Prompt, completion, and total tokens
+- **Latency**: End-to-end timing for each call
+- **Security Analysis**: Risk scores and security flags
+
+---
+
+## Optional: Graceful Shutdown
+
+For short-lived scripts or tests, explicitly flush remaining spans before exiting:
+
+```python
+from asymetry import shutdown_observability
+
+# At the end of your script
+shutdown_observability(timeout=10)
+```
+
+<Info>
+For long-running applications (web servers, etc.), spans are automatically flushed periodically and on process exit via `atexit`.
+</Info>
+
+---
+
+## Next Steps
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Installation" icon="download" href="/installation">
+    Detailed installation options and dependencies
+  </Card>
+  <Card title="Configuration" icon="gear" href="/sdk/configuration">
+    All configuration options and environment variables
+  </Card>
+  <Card title="Custom Tracing" icon="code" href="/sdk/tracing">
+    Add observability to your own functions
+  </Card>
+  <Card title="Security Analysis" icon="shield" href="/api-reference/security-analysis">
+    Understand security scoring
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

@@ -1,0 +1,339 @@
+---
+title: "Basic Usage"
+description: "Complete walkthrough of using the Asymetry SDK"
+sidebarTitle: "Basic Usage"
+---
+
+# Basic Usage Guide
+
+This guide walks through a complete example of using the Asymetry SDK to observe LLM operations.
+
+## Prerequisites
+
+Before starting, ensure you have:
+
+- Python 3.10+
+- An [Asymetry API key](https://asymetry.co)
+- OpenAI or Anthropic API key
+
+---
+
+## Step 1: Installation
+
+Install the SDK and your preferred LLM provider:
+
+```bash
+pip install asymetry openai tiktoken
+```
+
+---
+
+## Step 2: Environment Setup
+
+Create a `.env` file in your project:
+
+```bash .env
+ASYMETRY_API_KEY=sk_...
+OPENAI_API_KEY=sk-...
+```
+
+---
+
+## Step 3: Basic Script
+
+Create a simple script that makes LLM calls:
+
+```python basic_example.py
+"""Basic example of Asymetry SDK usage."""
+
+from asymetry import init_observability, shutdown_observability
+import openai
+
+# Initialize observability (must be called before making LLM calls)
+init_observability()
+
+# Create OpenAI client (automatically instrumented)
+client = openai.OpenAI()
+
+def main():
+    # Simple chat completion
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "What are the three laws of robotics?"}
+        ],
+        temperature=0.7,
+        max_tokens=200,
+    )
+    
+    print("Response:")
+    print(response.choices[0].message.content)
+    print()
+    print(f"Tokens used: {response.usage.total_tokens}")
+
+if __name__ == "__main__":
+    main()
+    
+    # Flush remaining spans before exit
+    shutdown_observability(timeout=5)
+```
+
+Run it:
+
+```bash
+python basic_example.py
+```
+
+---
+
+## Step 4: View in Dashboard
+
+Go to [asymetry.co](https://asymetry.co) to see your trace:
+
+- **Request details**: Model, temperature, max_tokens
+- **Messages**: Full conversation
+- **Response**: Complete output
+- **Metrics**: Latency, token usage
+- **Security**: Risk scores (if analysis enabled)
+
+---
+
+## Adding Custom Tracing
+
+Wrap your business logic with custom traces:
+
+```python
+from asymetry import init_observability, observe, trace_context
+import openai
+
+init_observability()
+client = openai.OpenAI()
+
+@observe(span_type="workflow")
+def customer_inquiry(question: str) -> str:
+    """Process a customer inquiry with full tracing."""
+    
+    # Step 1: Classify the inquiry
+    with trace_context("classify_intent"):
+        classification = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Classify this question as: billing, technical, or general"},
+                {"role": "user", "content": question}
+            ]
+        )
+        intent = classification.choices[0].message.content.strip().lower()
+    
+    # Step 2: Generate response based on intent
+    with trace_context("generate_response", attributes={"intent": intent}):
+        if "billing" in intent:
+            system_prompt = "You are a billing specialist."
+        elif "technical" in intent:
+            system_prompt = "You are a technical support engineer."
+        else:
+            system_prompt = "You are a helpful customer service agent."
+        
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": question}
+            ]
+        )
+    
+    return response.choices[0].message.content
+
+# Usage
+answer = customer_inquiry("Why is my bill higher this month?")
+print(answer)
+```
+
+This creates a trace hierarchy:
+
+```
+customer_inquiry (workflow)
+├── classify_intent
+│   └── llm.request (gpt-4o-mini)
+└── generate_response
+    └── llm.request (gpt-4o)
+```
+
+---
+
+## Handling Errors
+
+Errors are automatically captured:
+
+```python
+from asymetry import init_observability, observe
+import openai
+
+init_observability()
+client = openai.OpenAI()
+
+@observe()
+def risky_operation():
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "Hello"}],
+            max_tokens=0,  # This will error!
+        )
+    except openai.BadRequestError as e:
+        print(f"Error: {e}")
+        # Error is automatically tracked in the span
+        raise
+
+risky_operation()
+```
+
+The error details (type, message, stack trace) appear in your dashboard.
+
+---
+
+## Adding Context with Attributes
+
+Add searchable attributes to your spans:
+
+```python
+from asymetry import observe, add_span_attribute
+
+@observe()
+def process_order(order_id: str, user_id: str):
+    # Add attributes as you go
+    add_span_attribute("order_id", order_id)
+    add_span_attribute("user_id", user_id)
+    
+    # Process the order...
+    
+    # Add more attributes after processing
+    add_span_attribute("total_amount", 99.99)
+    add_span_attribute("items_count", 3)
+```
+
+---
+
+## Adding Events
+
+Track key moments within a span:
+
+```python
+from asymetry import observe, add_span_event
+
+@observe()
+def data_pipeline(batch_id: str):
+    add_span_event("pipeline_started", {"batch_id": batch_id})
+    
+    # Fetch data
+    records = fetch_records(batch_id)
+    add_span_event("records_fetched", {"count": len(records)})
+    
+    # Process
+    results = process(records)
+    add_span_event("processing_complete", {"success": len(results)})
+    
+    # Save
+    save(results)
+    add_span_event("pipeline_finished")
+```
+
+---
+
+## Complete Example
+
+Here's a full example combining everything:
+
+```python complete_example.py
+"""Complete Asymetry SDK example with custom tracing."""
+
+import os
+from asymetry import (
+    init_observability,
+    shutdown_observability,
+    observe,
+    trace_context,
+    add_span_attribute,
+    add_span_event,
+)
+import openai
+
+# Initialize
+init_observability(log_level="INFO")
+client = openai.OpenAI()
+
+
+@observe(span_type="tool")
+def search_knowledge_base(query: str) -> str:
+    """Simulated knowledge base search."""
+    add_span_event("search_started", {"query": query})
+    # In reality, this would hit a vector DB
+    result = f"Found relevant info for: {query}"
+    add_span_event("search_complete", {"result_length": len(result)})
+    return result
+
+
+@observe(span_type="agent")
+def research_assistant(question: str) -> str:
+    """AI research assistant with tool use."""
+    
+    add_span_attribute("question_length", len(question))
+    
+    # Step 1: Search for relevant info
+    with trace_context("gather_context"):
+        context = search_knowledge_base(question)
+        add_span_attribute("context_found", True)
+    
+    # Step 2: Generate answer using context
+    with trace_context("generate_answer"):
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": f"Use this context: {context}"},
+                {"role": "user", "content": question}
+            ],
+            temperature=0.3,
+        )
+        answer = response.choices[0].message.content
+        add_span_attribute("answer_length", len(answer))
+    
+    add_span_event("assistant_complete")
+    return answer
+
+
+def main():
+    questions = [
+        "What are the benefits of microservices?",
+        "How does containerization work?",
+    ]
+    
+    for q in questions:
+        print(f"\nQ: {q}")
+        answer = research_assistant(q)
+        print(f"A: {answer[:200]}...")
+
+
+if __name__ == "__main__":
+    main()
+    shutdown_observability(timeout=10)
+    print("\n✓ Traces sent to Asymetry!")
+```
+
+---
+
+## What's Next
+
+<CardGroup cols={2}>
+  <Card title="Multi-LLM" icon="layer-group" href="/guides/multi-llm">
+    Use multiple LLM providers together
+  </Card>
+  <Card title="Custom Tracing" icon="code" href="/guides/custom-tracing">
+    Advanced tracing patterns
+  </Card>
+  <Card title="Agentic Workflows" icon="robot" href="/guides/agentic-workflows">
+    Trace AI agents
+  </Card>
+  <Card title="Dashboard" icon="chart-bar" href="https://asymetry.co">
+    View your traces
+  </Card>
+</CardGroup>

@@ -1,0 +1,341 @@
+---
+title: "Tracing"
+description: "Add custom observability to your business logic"
+---
+
+# Tracing
+
+Beyond automatic LLM instrumentation, Asymetry provides powerful tools for tracing your own business logic using OpenTelemetry.
+
+## @observe Decorator
+
+The `@observe` decorator is the simplest way to trace a function:
+
+```python
+from asymetry import observe
+
+@observe(name="process_order")
+def process_order(order_id: str, items: list) -> dict:
+    # Your business logic
+    return {"status": "processed", "order_id": order_id}
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | `str \| None` | Function name | Custom span name |
+| `kind` | `str` | `"internal"` | Span kind: `internal`, `client`, `server`, `producer`, `consumer` |
+| `attributes` | `dict \| None` | `None` | Custom attributes to attach to the span |
+| `span_type` | `str \| None` | `None` | Span type. Must be one of: `tool`, `agent`, `llm`, `workflow` |
+| `capture_args` | `bool` | `True` | Capture function arguments as span attributes |
+| `capture_result` | `bool` | `True` | Capture return value as span attribute |
+
+<Info>
+The `span_type` parameter only accepts these 4 values: `tool`, `agent`, `llm`, `workflow`. Using any other value will raise a `ValueError`.
+</Info>
+
+### Examples
+
+#### Basic Usage
+
+```python
+@observe()
+def my_function():
+    pass  # Uses function name "my_function" as span name
+```
+
+#### With Custom Name and Attributes
+
+```python
+@observe(
+    name="validate_payment",
+    attributes={"payment_provider": "stripe", "currency": "USD"}
+)
+def validate_payment(amount: float, card_token: str) -> bool:
+    # Payment validation logic
+    return True
+```
+
+#### Semantic Span Types
+
+Use `span_type` to categorize spans for better visualization:
+
+```python
+@observe(span_type="agent")
+def customer_support_agent(query: str) -> str:
+    # Agent logic
+    return response
+
+@observe(span_type="tool")
+def search_database(query: str) -> list:
+    # Tool implementation
+    return results
+
+@observe(span_type="workflow")
+def process_refund_workflow(order_id: str):
+    # Multi-step workflow
+    pass
+
+@observe(span_type="llm")
+def custom_llm_call(prompt: str):
+    # Custom LLM integration
+    pass
+```
+
+#### Disable Argument Capture
+
+For sensitive data, disable automatic argument capture:
+
+```python
+@observe(capture_args=False)
+def process_pii(ssn: str, credit_card: str):
+    # Arguments won't be logged
+    pass
+```
+
+---
+
+## trace_context() Context Manager
+
+For more granular control, use `trace_context` as a context manager:
+
+```python
+from asymetry import trace_context
+
+def complex_operation():
+    with trace_context("fetch_data", attributes={"source": "api"}):
+        data = fetch_from_api()
+    
+    with trace_context("process_data"):
+        result = process(data)
+    
+    with trace_context("save_result", attributes={"destination": "db"}):
+        save_to_database(result)
+    
+    return result
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | `str` | **required** | Span name |
+| `attributes` | `dict \| None` | `None` | Custom attributes |
+| `kind` | `str` | `"internal"` | Span kind |
+| `span_type` | `str \| None` | `None` | Must be one of: `tool`, `agent`, `llm`, `workflow` |
+
+### Nested Spans
+
+Context managers can be nested to create span hierarchies:
+
+```python
+from asymetry import trace_context
+
+def checkout_flow(cart_id: str):
+    with trace_context("checkout", attributes={"cart_id": cart_id}):
+        
+        with trace_context("validate_cart"):
+            validate(cart_id)
+        
+        with trace_context("process_payment"):
+            with trace_context("authorize"):
+                authorize_card()
+            with trace_context("capture"):
+                capture_payment()
+        
+        with trace_context("fulfill_order"):
+            ship_items()
+```
+
+This creates a trace tree:
+
+```
+checkout
+├── validate_cart
+├── process_payment
+│   ├── authorize
+│   └── capture
+└── fulfill_order
+```
+
+---
+
+## add_span_attribute()
+
+Add attributes to the current active span from anywhere in your code:
+
+```python
+from asymetry import observe, add_span_attribute
+
+@observe()
+def process_request(user_id: str):
+    # Add attributes as you learn more
+    user = fetch_user(user_id)
+    add_span_attribute("user_tier", user.tier)
+    add_span_attribute("user_country", user.country)
+    
+    result = do_processing(user)
+    add_span_attribute("result_count", len(result))
+    
+    return result
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `key` | `str` | Attribute name |
+| `value` | `Any` | Attribute value (must be JSON-serializable) |
+
+---
+
+## add_span_event()
+
+Add timestamped events to the current span:
+
+```python
+from asymetry import observe, add_span_event
+
+@observe()
+def data_pipeline(batch_id: str):
+    add_span_event("pipeline_started", {"batch_id": batch_id})
+    
+    records = fetch_records(batch_id)
+    add_span_event("records_fetched", {"count": len(records)})
+    
+    processed = transform(records)
+    add_span_event("transformation_complete", {"success": len(processed)})
+    
+    save(processed)
+    add_span_event("pipeline_complete")
+```
+
+Events appear as annotations on the span timeline, making it easy to understand what happened and when.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `name` | `str` | Event name |
+| `attributes` | `dict \| None` | Optional event attributes |
+
+---
+
+## Async Function Support
+
+All tracing tools work with async functions:
+
+```python
+from asymetry import observe, trace_context
+
+@observe(name="async_handler")
+async def handle_request(request_id: str):
+    async with trace_context("fetch_data"):
+        data = await fetch_async(request_id)
+    
+    async with trace_context("process"):
+        result = await process_async(data)
+    
+    return result
+```
+
+---
+
+## Combining with LLM Calls
+
+Tracing works seamlessly with automatic LLM instrumentation:
+
+```python
+from asymetry import init_observability, observe, trace_context
+import openai
+
+init_observability()
+client = openai.OpenAI()
+
+@observe(span_type="agent")
+def ai_assistant(user_query: str) -> str:
+    with trace_context("understand_intent"):
+        # Intent classification (automatically traced)
+        intent = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": f"Classify intent: {user_query}"}]
+        ).choices[0].message.content
+    
+    with trace_context("generate_response"):
+        # Response generation (automatically traced)
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": user_query}]
+        ).choices[0].message.content
+    
+    return response
+```
+
+The resulting trace shows:
+
+```
+ai_assistant (agent)
+├── understand_intent
+│   └── llm.request (gpt-4o-mini)
+└── generate_response
+    └── llm.request (gpt-4o)
+```
+
+---
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Descriptive Span Names">
+    Choose names that describe the action:
+    
+    ```python
+    # Good
+    @observe(name="validate_user_permissions")
+    
+    # Less descriptive
+    @observe(name="step1")
+    ```
+  </Accordion>
+  
+  <Accordion title="Add Context with Attributes">
+    Use attributes to add queryable context:
+    
+    ```python
+    @observe(attributes={"service": "payments", "version": "v2"})
+    ```
+  </Accordion>
+  
+  <Accordion title="Use span_type for Semantic Meaning">
+    The SDK supports exactly 4 span types:
+    
+    - `agent` - AI agents and reasoning loops
+    - `tool` - Tool/function implementations
+    - `llm` - Custom LLM integrations
+    - `workflow` - Multi-step processes
+  </Accordion>
+  
+  <Accordion title="Avoid Logging Sensitive Data">
+    Disable argument capture for sensitive functions:
+    
+    ```python
+    @observe(capture_args=False, capture_result=False)
+    def handle_credentials(password: str):
+        pass
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Telemetry" icon="chart-line" href="/sdk/telemetry">
+    Understand what data is captured
+  </Card>
+  <Card title="Custom Tracing Guide" icon="route" href="/guides/custom-tracing">
+    Real-world tracing patterns
+  </Card>
+</CardGroup>

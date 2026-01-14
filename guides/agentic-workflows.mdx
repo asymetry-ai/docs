@@ -1,0 +1,484 @@
+---
+title: "Agentic Workflows"
+description: "Trace AI agents with tool calling and multi-step reasoning"
+sidebarTitle: "Agentic Workflows"
+---
+
+# Agentic Workflows
+
+Modern AI applications use agents that reason, plan, and call tools. The Asymetry SDK provides rich observability for these complex workflows.
+
+## What is an Agentic Workflow?
+
+<CardGroup cols={2}>
+  <Card title="Reasoning" icon="brain">
+    LLM decides what to do next
+  </Card>
+  <Card title="Tool Calling" icon="wrench">
+    Agent invokes external functions
+  </Card>
+  <Card title="Multi-Turn" icon="arrows-rotate">
+    Multiple LLM calls in a loop
+  </Card>
+  <Card title="State Management" icon="database">
+    Tracking context across steps
+  </Card>
+</CardGroup>
+
+---
+
+## Basic Agent Pattern
+
+```python
+from asymetry import init_observability, observe, trace_context, add_span_attribute
+import openai
+import json
+
+init_observability()
+client = openai.OpenAI()
+
+# Define tools
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get current weather for a city",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "city": {"type": "string"}
+                },
+                "required": ["city"]
+            }
+        }
+    }
+]
+
+# Tool implementations
+@observe(span_type="tool")
+def get_weather(city: str) -> str:
+    add_span_attribute("tool", "get_weather")
+    add_span_attribute("city", city)
+    # In reality, call a weather API
+    return json.dumps({"city": city, "temp": 72, "condition": "sunny"})
+
+# Tool dispatcher
+TOOL_MAP = {"get_weather": get_weather}
+
+@observe(name="weather_agent", span_type="agent")
+def weather_agent(query: str) -> str:
+    """Simple agent that can check weather."""
+    
+    messages = [{"role": "user", "content": query}]
+    
+    # Initial LLM call
+    with trace_context("initial_call"):
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            tools=TOOLS,
+            tool_choice="auto"
+        )
+    
+    message = response.choices[0].message
+    
+    # Check for tool calls
+    if message.tool_calls:
+        messages.append(message)
+        
+        # Execute each tool
+        for tool_call in message.tool_calls:
+            func_name = tool_call.function.name
+            args = json.loads(tool_call.function.arguments)
+            
+            with trace_context(f"tool_{func_name}"):
+                result = TOOL_MAP[func_name](**args)
+            
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": result
+            })
+        
+        # Get final response
+        with trace_context("final_response"):
+            final = client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages
+            )
+            return final.choices[0].message.content
+    
+    return message.content
+
+# Use it
+answer = weather_agent("What's the weather in Paris?")
+print(answer)
+```
+
+---
+
+## ReAct Agent Pattern
+
+Implement the Reason + Act pattern:
+
+```python
+from asymetry import observe, trace_context, add_span_attribute, add_span_event
+import openai
+import json
+
+client = openai.OpenAI()
+
+TOOLS = [
+    {"type": "function", "function": {"name": "search", "description": "Search the web", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
+    {"type": "function", "function": {"name": "calculate", "description": "Calculate a math expression", "parameters": {"type": "object", "properties": {"expression": {"type": "string"}}, "required": ["expression"]}}},
+]
+
+@observe(span_type="tool")
+def search(query: str) -> str:
+    return f"Search results for '{query}': [mock results]"
+
+@observe(span_type="tool")
+def calculate(expression: str) -> str:
+    try:
+        return str(eval(expression))  # Caution: use a safe parser in production
+    except:
+        return "Error: invalid expression"
+
+TOOL_MAP = {"search": search, "calculate": calculate}
+
+@observe(name="react_agent", span_type="agent")
+def react_agent(question: str, max_steps: int = 5) -> str:
+    """ReAct agent: Reason and Act in a loop."""
+    
+    add_span_attribute("question", question)
+    add_span_attribute("max_steps", max_steps)
+    
+    system_prompt = """You are a helpful assistant. Use the available tools to answer questions.
+Think step by step. When you have the final answer, respond without calling tools."""
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": question}
+    ]
+    
+    for step in range(max_steps):
+        add_span_event(f"step_{step + 1}_start")
+        
+        with trace_context(f"step_{step + 1}", attributes={"step": step + 1}):
+            # Reason: LLM decides next action
+            with trace_context("reason"):
+                response = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=messages,
+                    tools=TOOLS,
+                    tool_choice="auto"
+                )
+            
+            message = response.choices[0].message
+            messages.append(message)
+            
+            # Check if we're done
+            if not message.tool_calls:
+                add_span_attribute("final_step", step + 1)
+                add_span_event("agent_complete", {"steps": step + 1})
+                return message.content
+            
+            # Act: Execute tools
+            with trace_context("act"):
+                for tool_call in message.tool_calls:
+                    func_name = tool_call.function.name
+                    args = json.loads(tool_call.function.arguments)
+                    
+                    add_span_event("tool_call", {
+                        "tool": func_name,
+                        "args": args
+                    })
+                    
+                    result = TOOL_MAP[func_name](**args)
+                    
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": result
+                    })
+    
+    add_span_attribute("max_steps_reached", True)
+    return "Max steps reached without conclusion"
+
+# Use it
+answer = react_agent("What is the population of France multiplied by 2?")
+```
+
+---
+
+## Multi-Agent Orchestration
+
+Coordinate multiple specialized agents:
+
+```python
+from asymetry import observe, trace_context, add_span_attribute
+
+@observe(span_type="agent")
+def research_agent(topic: str) -> str:
+    """Agent specialized in research."""
+    add_span_attribute("agent_role", "researcher")
+    # Research logic...
+    return research_findings
+
+@observe(span_type="agent")
+def writer_agent(research: str, style: str) -> str:
+    """Agent specialized in writing."""
+    add_span_attribute("agent_role", "writer")
+    add_span_attribute("style", style)
+    # Writing logic...
+    return written_content
+
+@observe(span_type="agent")
+def editor_agent(content: str) -> str:
+    """Agent specialized in editing."""
+    add_span_attribute("agent_role", "editor")
+    # Editing logic...
+    return final_content
+
+@observe(name="content_pipeline", span_type="workflow")
+def create_content(topic: str, style: str = "professional") -> str:
+    """Orchestrate multiple agents to create content."""
+    
+    add_span_attribute("topic", topic)
+    add_span_attribute("target_style", style)
+    
+    # Stage 1: Research
+    with trace_context("research_stage"):
+        research = research_agent(topic)
+    
+    # Stage 2: Write
+    with trace_context("writing_stage"):
+        draft = writer_agent(research, style)
+    
+    # Stage 3: Edit
+    with trace_context("editing_stage"):
+        final = editor_agent(draft)
+    
+    return final
+```
+
+Trace visualization:
+
+```
+content_pipeline (workflow)
+├── research_stage
+│   └── research_agent (agent)
+│       └── llm.request
+├── writing_stage
+│   └── writer_agent (agent)
+│       └── llm.request
+└── editing_stage
+    └── editor_agent (agent)
+        └── llm.request
+```
+
+---
+
+## Parallel Tool Execution
+
+Execute multiple tools concurrently:
+
+```python
+from asymetry import observe, trace_context, add_span_attribute
+import asyncio
+
+@observe(span_type="tool")
+async def fetch_stock_price(symbol: str) -> dict:
+    add_span_attribute("symbol", symbol)
+    await asyncio.sleep(0.1)  # Simulated API call
+    return {"symbol": symbol, "price": 150.00}
+
+@observe(span_type="tool")
+async def fetch_company_info(symbol: str) -> dict:
+    add_span_attribute("symbol", symbol)
+    await asyncio.sleep(0.1)
+    return {"symbol": symbol, "name": "Company Inc", "sector": "Tech"}
+
+@observe(name="stock_analyzer", span_type="agent")
+async def analyze_stock(symbol: str) -> dict:
+    """Fetch multiple data sources in parallel."""
+    
+    add_span_attribute("symbol", symbol)
+    
+    # Parallel tool execution
+    with trace_context("parallel_fetch"):
+        price_task = fetch_stock_price(symbol)
+        info_task = fetch_company_info(symbol)
+        
+        price, info = await asyncio.gather(price_task, info_task)
+    
+    # LLM analysis of combined data
+    with trace_context("analysis"):
+        analysis = await analyze_with_llm(price, info)
+    
+    return {
+        "price": price,
+        "info": info,
+        "analysis": analysis
+    }
+```
+
+---
+
+## Memory and Context
+
+Track agent memory across interactions:
+
+```python
+from asymetry import observe, add_span_attribute, add_span_event
+
+class AgentMemory:
+    def __init__(self):
+        self.conversation = []
+        self.facts = {}
+    
+    def add_message(self, role: str, content: str):
+        self.conversation.append({"role": role, "content": content})
+    
+    def remember_fact(self, key: str, value: str):
+        self.facts[key] = value
+        add_span_event("fact_remembered", {"key": key})
+    
+    def get_context(self) -> str:
+        context = "Known facts:\n"
+        for k, v in self.facts.items():
+            context += f"- {k}: {v}\n"
+        return context
+
+@observe(name="stateful_agent", span_type="agent")
+def stateful_agent(memory: AgentMemory, user_input: str) -> str:
+    add_span_attribute("memory_facts_count", len(memory.facts))
+    add_span_attribute("conversation_length", len(memory.conversation))
+    
+    # Add user input to memory
+    memory.add_message("user", user_input)
+    
+    # Get context from memory
+    context = memory.get_context()
+    add_span_attribute("context_length", len(context))
+    
+    # Generate response with context
+    response = generate_response(context, memory.conversation)
+    
+    # Update memory with response
+    memory.add_message("assistant", response)
+    
+    # Extract and remember any new facts
+    new_facts = extract_facts(user_input, response)
+    for key, value in new_facts.items():
+        memory.remember_fact(key, value)
+    
+    return response
+```
+
+---
+
+## Error Recovery in Agents
+
+Handle and recover from failures:
+
+```python
+from asymetry import observe, trace_context, add_span_attribute, add_span_event
+
+@observe(name="resilient_agent", span_type="agent")
+def resilient_agent(task: str) -> str:
+    """Agent with automatic error recovery."""
+    
+    max_retries = 3
+    errors = []
+    
+    for attempt in range(max_retries):
+        with trace_context(f"attempt_{attempt + 1}"):
+            add_span_attribute("attempt", attempt + 1)
+            
+            try:
+                result = execute_task(task)
+                add_span_event("success", {"attempt": attempt + 1})
+                return result
+                
+            except ToolError as e:
+                add_span_event("tool_error", {
+                    "tool": e.tool_name,
+                    "error": str(e)
+                })
+                errors.append(f"Tool {e.tool_name} failed: {e}")
+                
+                # Try alternative tool
+                if alternative := get_alternative_tool(e.tool_name):
+                    add_span_event("trying_alternative", {"tool": alternative})
+                    continue
+                    
+            except RateLimitError:
+                add_span_event("rate_limited")
+                wait_time = 2 ** attempt
+                add_span_attribute("wait_seconds", wait_time)
+                time.sleep(wait_time)
+                continue
+                
+            except Exception as e:
+                add_span_event("unexpected_error", {"error": str(e)})
+                errors.append(str(e))
+    
+    add_span_attribute("all_attempts_failed", True)
+    add_span_attribute("errors", errors)
+    raise AgentError(f"Failed after {max_retries} attempts: {errors}")
+```
+
+---
+
+## Dashboard Insights
+
+Agentic workflows in the Asymetry dashboard show:
+
+| Metric | Value |
+| --- | --- |
+| Total Steps | Number of reasoning cycles |
+| Tools Called | List of tools invoked |
+| Total Tokens | Sum across all LLM calls |
+| Success Rate | Completed vs failed agents |
+| Avg Duration | Time from start to finish |
+
+Filter by `span_type="agent"` to see all agent invocations.
+
+---
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use span_type consistently">
+    - `agent` for agent spans
+    - `tool` for tool implementations
+    - `workflow` for orchestration
+  </Accordion>
+  
+  <Accordion title="Track steps and iterations">
+    Add step numbers as attributes for debugging loops
+  </Accordion>
+  
+  <Accordion title="Log tool calls as events">
+    Use `add_span_event("tool_call", {...})` for tool invocations
+  </Accordion>
+  
+  <Accordion title="Set reasonable limits">
+    Always have `max_steps` or `max_iterations` to prevent infinite loops
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Security Analysis" icon="shield" href="/api-reference/security-analysis">
+    Monitor agents for security risks
+  </Card>
+  <Card title="Dashboard" icon="chart-bar" href="https://asymetry.co">
+    View agent traces
+  </Card>
+</CardGroup>

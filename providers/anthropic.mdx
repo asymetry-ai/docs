@@ -1,0 +1,293 @@
+---
+title: "Anthropic Integration"
+description: "Automatic instrumentation for Anthropic Claude API calls"
+sidebarTitle: "Anthropic"
+---
+
+# Anthropic Integration
+
+The Asymetry SDK automatically instruments Anthropic Claude API calls. Just initialize the SDK and your Claude calls are tracked.
+
+## Quick Start
+
+```python
+from asymetry import init_observability
+import anthropic
+
+init_observability()
+
+client = anthropic.Anthropic()
+
+message = client.messages.create(
+    model="claude-3-5-sonnet-latest",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+# Automatically tracked! ✓
+```
+
+---
+
+## Supported APIs
+
+| API | Method | Status |
+| --- | --- | --- |
+| Messages | `client.messages.create()` | ✅ Full support |
+| Messages (Streaming) | `stream=True` | ⚠️ Partial support |
+
+---
+
+## Messages API
+
+All parameters are captured automatically:
+
+```python
+message = client.messages.create(
+    model="claude-3-5-haiku-latest",
+    max_tokens=500,
+    system="You are a helpful Python tutor.",
+    messages=[
+        {"role": "user", "content": "What are list comprehensions?"}
+    ],
+    temperature=0.7,
+)
+
+print(message.content[0].text)
+```
+
+### Captured Data
+
+| Field | Description |
+| --- | --- |
+| `model` | Model identifier (`claude-3-5-sonnet-latest`, etc.) |
+| `system` | System prompt |
+| `messages` | Full conversation history |
+| `response` | Complete assistant response |
+| `stop_reason` | Why generation stopped |
+| `latency_ms` | Request duration |
+| `max_tokens` | Maximum output tokens |
+| `temperature` | Sampling temperature |
+
+---
+
+## Token Usage
+
+Anthropic always returns accurate token counts:
+
+```python
+message = client.messages.create(...)
+
+# Always available:
+# message.usage.input_tokens = 125
+# message.usage.output_tokens = 89
+```
+
+The SDK captures these values directly from the response.
+
+---
+
+## System Prompts
+
+System prompts can be specified at the top level or in messages:
+
+<Tabs>
+  <Tab title="Top-Level System">
+    ```python
+    message = client.messages.create(
+        model="claude-3-5-sonnet-latest",
+        max_tokens=500,
+        system="You are a senior Python developer.",
+        messages=[
+            {"role": "user", "content": "Review this code: ..."}
+        ]
+    )
+    ```
+  </Tab>
+  <Tab title="Multi-Modal System">
+    ```python
+    message = client.messages.create(
+        model="claude-3-5-sonnet-latest",
+        max_tokens=500,
+        system=[
+            {"type": "text", "text": "You are an expert assistant."},
+            {"type": "text", "text": "Always be helpful and accurate."}
+        ],
+        messages=[
+            {"role": "user", "content": "Help me with..."}
+        ]
+    )
+    ```
+  </Tab>
+</Tabs>
+
+Both formats are captured correctly.
+
+---
+
+## Tool Use
+
+Claude's tool use is fully supported:
+
+```python
+tools = [
+    {
+        "name": "get_weather",
+        "description": "Get the current weather in a location",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "City and country"
+                }
+            },
+            "required": ["location"]
+        }
+    }
+]
+
+message = client.messages.create(
+    model="claude-3-5-sonnet-latest",
+    max_tokens=1024,
+    tools=tools,
+    messages=[{"role": "user", "content": "What's the weather in Tokyo?"}]
+)
+
+# Check for tool use
+if message.stop_reason == "tool_use":
+    tool_use = message.content[0]
+    print(f"Tool: {tool_use.name}")
+    print(f"Input: {tool_use.input}")
+```
+
+### Captured Tool Data
+
+- Tool definitions
+- Tool calls (name, id, input)
+- Tool results from follow-up messages
+- Multi-turn tool conversations
+
+---
+
+## Multi-Turn Tool Conversations
+
+Full conversation flows are captured:
+
+```python
+# Initial request
+message = client.messages.create(
+    model="claude-3-5-sonnet-latest",
+    max_tokens=1024,
+    tools=tools,
+    messages=[{"role": "user", "content": "What's the weather in Tokyo?"}]
+)
+
+# Get tool result
+tool_result = get_weather("Tokyo, Japan")
+
+# Continue conversation with tool result
+final_message = client.messages.create(
+    model="claude-3-5-sonnet-latest",
+    max_tokens=1024,
+    tools=tools,
+    messages=[
+        {"role": "user", "content": "What's the weather in Tokyo?"},
+        {"role": "assistant", "content": message.content},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use.id,
+                    "content": tool_result
+                }
+            ]
+        }
+    ]
+)
+```
+
+Both API calls are tracked as separate spans in the same trace.
+
+---
+
+## Streaming
+
+Streaming is supported with partial telemetry:
+
+```python
+with client.messages.stream(
+    model="claude-3-5-sonnet-latest",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Tell me a story"}]
+) as stream:
+    for text in stream.text_stream:
+        print(text, end="", flush=True)
+```
+
+<Info>
+The full response is captured after streaming completes. Chunk-level telemetry is in development.
+</Info>
+
+---
+
+## Error Handling
+
+Errors are automatically captured:
+
+```python
+try:
+    message = client.messages.create(
+        model="claude-3-5-sonnet-latest",
+        max_tokens=0,  # Invalid!
+        messages=[{"role": "user", "content": "Hello"}]
+    )
+except anthropic.BadRequestError as e:
+    # Error is automatically tracked
+    pass
+```
+
+### Captured Error Data
+
+| Field | Description |
+| --- | --- |
+| `error_type` | `anthropic.BadRequestError`, `anthropic.RateLimitError`, etc. |
+| `error_message` | Error details |
+| `stack_trace` | Python stack trace |
+
+---
+
+## Combining with Custom Tracing
+
+Add context with custom spans:
+
+```python
+from asymetry import init_observability, observe
+import anthropic
+
+init_observability()
+client = anthropic.Anthropic()
+
+@observe(span_type="agent")
+def code_review_agent(code: str):
+    review = client.messages.create(
+        model="claude-3-5-sonnet-latest",
+        max_tokens=2000,
+        system="You are a senior code reviewer.",
+        messages=[{"role": "user", "content": f"Review:\n{code}"}]
+    )
+    return review.content[0].text
+```
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="OpenAI Integration" icon="robot" href="/providers/openai">
+    Using Asymetry with OpenAI
+  </Card>
+  <Card title="Multi-LLM Guide" icon="layer-group" href="/guides/multi-llm">
+    Using multiple providers together
+  </Card>
+</CardGroup>

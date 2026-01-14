@@ -1,19 +1,5 @@
-<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M9.06145 23.1079C5.26816 22.3769 -3.39077 20.6274 1.4173 5.06384C9.6344 6.09939 16.9728 14.0644 9.06145 23.1079Z" fill="url(#paint0_linear_17557_2021)"/>
-<path d="M8.91928 23.0939C5.27642 21.2223 0.78371 4.20891 17.0071 0C20.7569 7.19341 19.6212 16.5452 8.91928 23.0939Z" fill="url(#paint1_linear_17557_2021)"/>
-<path d="M8.91388 23.0788C8.73534 19.8817 10.1585 9.08525 23.5699 13.1107C23.1812 20.1229 18.984 26.4182 8.91388 23.0788Z" fill="url(#paint2_linear_17557_2021)"/>
-<defs>
-<linearGradient id="paint0_linear_17557_2021" x1="3.77557" y1="5.91571" x2="5.23185" y2="21.5589" gradientUnits="userSpaceOnUse">
-<stop stop-color="#18E299"/>
-<stop offset="1" stop-color="#15803D"/>
-</linearGradient>
-<linearGradient id="paint1_linear_17557_2021" x1="12.1711" y1="-0.718425" x2="10.1897" y2="22.9832" gradientUnits="userSpaceOnUse">
-<stop stop-color="#16A34A"/>
-<stop offset="1" stop-color="#4ADE80"/>
-</linearGradient>
-<linearGradient id="paint2_linear_17557_2021" x1="23.1327" y1="15.353" x2="9.33841" y2="18.5196" gradientUnits="userSpaceOnUse">
-<stop stop-color="#4ADE80"/>
-<stop offset="1" stop-color="#0D9373"/>
-</linearGradient>
-</defs>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg version="1.1" viewBox="0 0 1024 1024" width="1024" height="1024" xmlns="http://www.w3.org/2000/svg">
+<path transform="translate(0)" d="m0 0h1024v1024h-1024z" fill="#ffffff"/>
+<path transform="translate(567,294)" fill="#1D4ED8" d="m0 0h28l17 3 18 6 19 10 16 12 16 16 7 10 8 13 8 18 4 15 2 13v15l-2 15-8 24-9 16-9 12-7 7-5 2-7-23-7-19-7-14-9-13-7-8-13-9-15-6-14-2-20 1-18 4-16 6-16 8-10 6-14 10-11 9-10 9-10 11-11 17-7 16-2 13 1 14 6 12 5 5 7 6 15 7 17 4 8 1h37l27-4 24-6 25-9 16-8 16-9 16-12 14-12 7-7 11-16 7-16 4-15 2-12v-40l3 4 7 19 7 17 6 16 13 34 25 65 8 20 6 16 13 34v3h-23l-19-3-18-6-16-9-14-12-9-10-9-14-9-21-8-25-1-5-10 8-7 7-11 9-13 11-19 14-11 7-18 11-18 10-23 12-33 15-19 8-25 9-30 10-30 8-33 7-22 3-12 1h-29l-16-3-11-4-8-6-5-6-2-6v-11l4-15 8-18 12-23 10-17 25-40 30-45 11-16 13-18 11-16 12-16 10-14 10-13 9-11 9-10 21-21 11-9 15-11 13-8 16-8 11-5 24-7z"/>
 </svg>

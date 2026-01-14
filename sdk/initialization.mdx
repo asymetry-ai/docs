@@ -1,0 +1,185 @@
+---
+title: "Initialization"
+description: "Initialize the Asymetry SDK in your application"
+---
+
+# Initialization
+
+The SDK is initialized with a single function call that sets up all instrumentation and starts the background exporter.
+
+## init_observability()
+
+```python
+from asymetry import init_observability
+
+init_observability(
+    api_key=None,           # Override ASYMETRY_API_KEY
+    enabled=True,           # Master switch
+    log_level="INFO",       # Logging verbosity
+    enable_tracing=True,    # Enable OpenTelemetry tracing
+)
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `api_key` | `str \| None` | `None` | API key for authentication. Falls back to `ASYMETRY_API_KEY` env var. |
+| `enabled` | `bool` | `True` | Master switch to enable/disable all instrumentation. |
+| `log_level` | `str` | `"INFO"` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
+| `enable_tracing` | `bool` | `True` | Enable OpenTelemetry tracing for custom spans. |
+
+### Example: Basic Initialization
+
+```python
+from asymetry import init_observability
+
+# Uses ASYMETRY_API_KEY from environment
+init_observability()
+```
+
+### Example: With Configuration
+
+```python
+from asymetry import init_observability
+
+init_observability(
+    api_key="sk_prod_...",
+    enabled=True,
+    log_level="DEBUG",  # Verbose logging for debugging
+)
+```
+
+### Example: Disable in Tests
+
+```python
+import os
+
+# Set environment variable before importing
+os.environ["ASYMETRY_ENABLED"] = "false"
+
+from asymetry import init_observability
+init_observability()  # Instrumentation is skipped
+```
+
+---
+
+## shutdown_observability()
+
+Gracefully shutdown the SDK, flushing any remaining spans to the API.
+
+```python
+from asymetry import shutdown_observability
+
+shutdown_observability(timeout=10)
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `timeout` | `int` | `10` | Maximum seconds to wait for the flush to complete. |
+
+### When to Use
+
+<Tabs>
+  <Tab title="Short Scripts">
+    Always call `shutdown_observability()` at the end to ensure all spans are sent:
+    
+    ```python
+    from asymetry import init_observability, shutdown_observability
+    
+    init_observability()
+    
+    # Your LLM calls here...
+    
+    shutdown_observability(timeout=10)
+    ```
+  </Tab>
+  <Tab title="Long-Running Apps">
+    For web servers and long-running processes, shutdown is handled automatically via `atexit`:
+    
+    ```python
+    from asymetry import init_observability
+    
+    init_observability()
+    
+    # Your Flask/FastAPI/Django app runs here
+    # Shutdown happens automatically on process exit
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Initialization Flow
+
+When `init_observability()` is called:
+
+<Steps>
+  <Step title="Load Configuration">
+    Reads environment variables and applies overrides
+  </Step>
+  <Step title="Validate API Key">
+    Ensures an API key is present if `enabled=True`
+  </Step>
+  <Step title="Start Exporter">
+    Creates the background thread for batching and sending telemetry
+  </Step>
+  <Step title="Instrument Providers">
+    Monkey patches OpenAI and Anthropic clients (if installed)
+  </Step>
+  <Step title="Initialize Tracing">
+    Sets up OpenTelemetry with the Asymetry span processor
+  </Step>
+  <Step title="Register Shutdown">
+    Registers `atexit` handler for graceful shutdown
+  </Step>
+</Steps>
+
+---
+
+## Idempotent Initialization
+
+Calling `init_observability()` multiple times is safe – subsequent calls are no-ops:
+
+```python
+init_observability()
+init_observability()  # Does nothing, already initialized
+```
+
+---
+
+## Error Handling
+
+<AccordionGroup>
+  <Accordion title="Missing API Key">
+    If `ASYMETRY_API_KEY` is not set and no key is passed:
+    
+    ```
+    ValueError: ASYMETRY_API_KEY is required when ASYMETRY_ENABLED=true.
+    Get your API key from https://asymetry.co/dashboard
+    ```
+    
+    **Solution**: Set the environment variable or pass `api_key` parameter.
+  </Accordion>
+  
+  <Accordion title="Provider Not Installed">
+    If OpenAI or Anthropic SDKs are not installed, instrumentation is silently skipped:
+    
+    ```
+    DEBUG: OpenAI not found, skipping instrumentation
+    DEBUG: Anthropic not found, skipping instrumentation
+    ```
+    
+    This is expected behavior – install the SDKs you need.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Next Steps
+
+<Card title="Configuration" icon="gear" href="/sdk/configuration">
+  Learn about all environment variables and configuration options
+</Card>

@@ -1,0 +1,380 @@
+---
+title: "Custom Tracing"
+description: "Advanced patterns for tracing business logic"
+sidebarTitle: "Custom Tracing"
+---
+
+# Custom Tracing Guide
+
+Beyond automatic LLM instrumentation, the Asymetry SDK provides powerful tools for tracing any Python code. This guide covers advanced patterns.
+
+## Core Concepts
+
+<CardGroup cols={2}>
+  <Card title="@observe" icon="eye">
+    Decorator for tracing functions
+  </Card>
+  <Card title="trace_context" icon="code-branch">
+    Context manager for inline spans
+  </Card>
+  <Card title="add_span_attribute" icon="tag">
+    Add metadata to active span
+  </Card>
+  <Card title="add_span_event" icon="clock">
+    Record timestamped events
+  </Card>
+</CardGroup>
+
+---
+
+## Pattern 1: Service Layer Tracing
+
+Trace your service layer to understand request flows:
+
+```python
+from asymetry import observe, add_span_attribute
+
+@observe(name="user_service.get_user")
+def get_user(user_id: str) -> dict:
+    add_span_attribute("user_id", user_id)
+    
+    user = db.fetch_user(user_id)
+    add_span_attribute("user_tier", user.tier)
+    
+    return user
+
+@observe(name="order_service.create_order", span_type="workflow")
+def create_order(user_id: str, items: list) -> dict:
+    add_span_attribute("user_id", user_id)
+    add_span_attribute("item_count", len(items))
+    
+    user = get_user(user_id)  # Creates nested span
+    order = db.create_order(user, items)
+    
+    add_span_attribute("order_id", order.id)
+    add_span_attribute("total_amount", order.total)
+    
+    return order
+```
+
+---
+
+## Pattern 2: Pipeline Stages
+
+Track data pipeline progress:
+
+```python
+from asymetry import observe, trace_context, add_span_event
+
+@observe(name="etl_pipeline", span_type="workflow")
+def run_pipeline(source: str, destination: str):
+    add_span_event("pipeline_started", {"source": source, "destination": destination})
+    
+    # Extract
+    with trace_context("extract", attributes={"source": source}):
+        data = extract_data(source)
+        add_span_event("extraction_complete", {"record_count": len(data)})
+    
+    # Transform
+    with trace_context("transform"):
+        cleaned = clean_data(data)
+        add_span_event("cleaning_done", {"remaining": len(cleaned)})
+        
+        enriched = enrich_data(cleaned)
+        add_span_event("enrichment_done")
+        
+        validated = validate_data(enriched)
+        add_span_event("validation_done", {"valid": len(validated)})
+    
+    # Load
+    with trace_context("load", attributes={"destination": destination}):
+        result = load_data(validated, destination)
+        add_span_event("load_complete", {"loaded": result.count})
+    
+    add_span_event("pipeline_finished")
+    return result
+```
+
+---
+
+## Pattern 3: Conditional Tracing
+
+Trace different code paths:
+
+```python
+from asymetry import observe, trace_context, add_span_attribute
+
+@observe(name="process_payment")
+def process_payment(amount: float, method: str):
+    add_span_attribute("amount", amount)
+    add_span_attribute("payment_method", method)
+    
+    if method == "credit_card":
+        with trace_context("credit_card_flow"):
+            result = process_credit_card(amount)
+            add_span_attribute("processor", "stripe")
+    
+    elif method == "bank_transfer":
+        with trace_context("bank_transfer_flow"):
+            result = process_bank_transfer(amount)
+            add_span_attribute("processor", "plaid")
+    
+    elif method == "crypto":
+        with trace_context("crypto_flow"):
+            result = process_crypto(amount)
+            add_span_attribute("processor", "coinbase")
+    
+    else:
+        raise ValueError(f"Unknown payment method: {method}")
+    
+    add_span_attribute("transaction_id", result.transaction_id)
+    return result
+```
+
+---
+
+## Pattern 4: Retry with Tracing
+
+Track retry attempts:
+
+```python
+from asymetry import observe, trace_context, add_span_attribute, add_span_event
+import time
+
+@observe(name="resilient_call")
+def call_with_retry(func, max_retries: int = 3):
+    add_span_attribute("max_retries", max_retries)
+    
+    for attempt in range(max_retries):
+        with trace_context(f"attempt_{attempt + 1}"):
+            add_span_attribute("attempt_number", attempt + 1)
+            
+            try:
+                result = func()
+                add_span_event("success", {"attempt": attempt + 1})
+                add_span_attribute("successful_attempt", attempt + 1)
+                return result
+            
+            except Exception as e:
+                add_span_event("failed", {
+                    "attempt": attempt + 1,
+                    "error": str(e)
+                })
+                
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff
+                    add_span_event("waiting", {"seconds": wait_time})
+                    time.sleep(wait_time)
+                else:
+                    add_span_attribute("all_attempts_failed", True)
+                    raise
+```
+
+---
+
+## Pattern 5: Async Tracing
+
+Trace async functions:
+
+```python
+from asymetry import observe, trace_context
+import asyncio
+
+@observe(name="async_aggregator")
+async def aggregate_data(sources: list[str]):
+    """Fetch from multiple sources concurrently."""
+    
+    async def fetch_one(source: str):
+        with trace_context(f"fetch_{source}", attributes={"source": source}):
+            return await fetch_from_source(source)
+    
+    # All fetches happen concurrently, each gets its own span
+    results = await asyncio.gather(*[fetch_one(s) for s in sources])
+    
+    with trace_context("merge_results"):
+        merged = merge_all(results)
+    
+    return merged
+```
+
+---
+
+## Pattern 6: Context Propagation
+
+Pass trace context to background tasks:
+
+```python
+from asymetry import observe, trace_context, add_span_attribute
+from concurrent.futures import ThreadPoolExecutor
+
+@observe(name="parallel_processing")
+def process_in_parallel(items: list):
+    add_span_attribute("total_items", len(items))
+    
+    def process_one(item):
+        # Each worker creates its own span
+        with trace_context(f"process_item", attributes={"item_id": item.id}):
+            return heavy_computation(item)
+    
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = list(executor.map(process_one, items))
+    
+    add_span_attribute("processed_count", len(results))
+    return results
+```
+
+---
+
+## Pattern 7: Feature Flags with Tracing
+
+Track feature flag decisions:
+
+```python
+from asymetry import observe, add_span_attribute, add_span_event
+
+@observe()
+def render_page(user_id: str):
+    # Check feature flag
+    new_ui_enabled = check_feature_flag("new_ui", user_id)
+    add_span_attribute("feature_new_ui", new_ui_enabled)
+    add_span_event("feature_flag_checked", {
+        "flag": "new_ui",
+        "enabled": new_ui_enabled
+    })
+    
+    if new_ui_enabled:
+        return render_new_ui()
+    else:
+        return render_legacy_ui()
+```
+
+---
+
+## Pattern 8: Span Types for Filtering
+
+The SDK supports exactly 4 span types for categorization:
+
+```python
+# AI agent spans
+@observe(span_type="agent")
+def customer_support_agent(): ...
+
+# Tool implementations
+@observe(span_type="tool")
+def search_database(): ...
+
+# Custom LLM integrations
+@observe(span_type="llm")
+def custom_llm_call(): ...
+
+# Multi-step workflows
+@observe(span_type="workflow")
+def data_pipeline(): ...
+```
+
+<Warning>
+Only these 4 values are valid for `span_type`: `tool`, `agent`, `llm`, `workflow`. Using any other value will raise a `ValueError`.
+</Warning>
+
+---
+
+## Pattern 9: Error Classification
+
+Add error context for debugging:
+
+```python
+from asymetry import observe, add_span_attribute
+
+@observe()
+def risky_operation(data: dict):
+    try:
+        result = process(data)
+        add_span_attribute("status", "success")
+        return result
+    
+    except ValidationError as e:
+        add_span_attribute("status", "validation_error")
+        add_span_attribute("error_type", "validation")
+        add_span_attribute("error_field", e.field)
+        raise
+    
+    except TimeoutError:
+        add_span_attribute("status", "timeout")
+        add_span_attribute("error_type", "timeout")
+        raise
+    
+    except Exception as e:
+        add_span_attribute("status", "error")
+        add_span_attribute("error_type", type(e).__name__)
+        add_span_attribute("error_message", str(e)[:200])
+        raise
+```
+
+---
+
+## Pattern 10: Request Context
+
+Add request-wide context:
+
+```python
+from asymetry import observe, add_span_attribute
+from contextvars import ContextVar
+
+# Request context
+request_id: ContextVar[str] = ContextVar("request_id")
+user_id: ContextVar[str] = ContextVar("user_id")
+
+@observe(name="api.handle_request")
+def handle_request(req):
+    # Set context at request start
+    request_id.set(req.id)
+    user_id.set(req.user_id)
+    
+    add_span_attribute("request_id", req.id)
+    add_span_attribute("user_id", req.user_id)
+    add_span_attribute("path", req.path)
+    add_span_attribute("method", req.method)
+    
+    return route_request(req)
+
+# Deep in the stack, context is still available
+@observe()
+def some_deep_function():
+    add_span_attribute("request_id", request_id.get())
+    add_span_attribute("user_id", user_id.get())
+    # ...
+```
+
+---
+
+## Best Practices Summary
+
+<AccordionGroup>
+  <Accordion title="Use descriptive span names">
+    `"user_service.get_user"` > `"get_user"` > `"function1"`
+  </Accordion>
+  
+  <Accordion title="Add context early">
+    Set important attributes at span start for debugging
+  </Accordion>
+  
+  <Accordion title="Use span_type consistently">
+    Use the 4 valid types: `tool`, `agent`, `llm`, `workflow`
+  </Accordion>
+  
+  <Accordion title="Track outcomes">
+    Add `status="success"` or `status="error"` for metrics
+  </Accordion>
+  
+  <Accordion title="Don't over-trace">
+    Focus on meaningful boundaries, not every function
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Next Steps
+
+<Card title="Agentic Workflows" icon="robot" href="/guides/agentic-workflows">
+  Trace AI agents with tool calling
+</Card>

@@ -1,0 +1,176 @@
+---
+title: "Installation"
+description: "Install the Asymetry SDK in your Python project"
+---
+
+# Installation
+
+The Asymetry SDK is available on PyPI and can be installed with pip or poetry.
+
+## Requirements
+
+- **Python 3.10+** is required
+- An active [Asymetry API key](https://asymetry.co)
+
+---
+
+## Install with pip
+
+```bash
+pip install asymetry
+```
+
+## Install with Poetry
+
+```bash
+poetry add asymetry
+```
+
+---
+
+## Optional Dependencies
+
+The SDK works out of the box, but you can install optional dependencies for enhanced functionality:
+
+### Token Counting with tiktoken
+
+For precise OpenAI token counting (instead of character-based estimates):
+
+```bash
+pip install tiktoken
+```
+
+### LLM Provider SDKs
+
+Install the provider SDKs you plan to use:
+
+<CodeGroup>
+```bash OpenAI
+pip install openai
+```
+
+```bash Anthropic
+pip install anthropic
+```
+
+```bash Both
+pip install openai anthropic
+```
+</CodeGroup>
+
+<Info>
+The Asymetry SDK gracefully handles missing provider SDKs – instrumentation is simply skipped for absent providers.
+</Info>
+
+---
+
+## Environment Setup
+
+The SDK requires an API key. You can set it via environment variable or pass it directly:
+
+### Environment Variable (Recommended)
+
+```bash
+export ASYMETRY_API_KEY="sk_..."
+```
+
+### Using a .env File
+
+Create a `.env` file in your project root:
+
+```bash .env
+ASYMETRY_API_KEY=sk_...
+ASYMETRY_ENABLED=true
+```
+
+The SDK automatically loads `.env` files using `python-dotenv`.
+
+### Programmatic Configuration
+
+```python
+from asymetry import init_observability
+
+init_observability(
+    api_key="sk_...",
+    enabled=True,
+    log_level="DEBUG",
+)
+```
+
+---
+
+## Verify Installation
+
+Run this quick test to verify everything is working:
+
+```python
+from asymetry import init_observability, shutdown_observability
+import openai
+
+# Initialize
+init_observability()
+
+# Make a test call
+client = openai.OpenAI()
+response = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "Say 'hello' in French"}],
+)
+
+print(response.choices[0].message.content)
+
+# Flush spans
+shutdown_observability(timeout=5)
+print("✓ Installation verified!")
+```
+
+Check the [Asymetry Dashboard](https://asymetry.co) to see your test trace.
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Missing API Key Error">
+    Ensure `ASYMETRY_API_KEY` is set in your environment or passed to `init_observability()`.
+    
+    ```python
+    init_observability(api_key="sk_...")
+    ```
+  </Accordion>
+  
+  <Accordion title="OpenAI/Anthropic Not Found Warning">
+    This is expected if you haven't installed the provider SDK. Install the relevant package:
+    
+    ```bash
+    pip install openai anthropic
+    ```
+  </Accordion>
+  
+  <Accordion title="tiktoken Warnings">
+    For precise token counts, install tiktoken:
+    
+    ```bash
+    pip install tiktoken
+    ```
+    
+    Without it, the SDK uses character-based estimates.
+  </Accordion>
+  
+  <Accordion title="Spans Not Appearing in Dashboard">
+    For short scripts, call `shutdown_observability()` to flush remaining spans:
+    
+    ```python
+    from asymetry import shutdown_observability
+    shutdown_observability(timeout=10)
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Next Steps
+
+<Card title="Configuration" icon="gear" href="/sdk/configuration">
+  Learn about all configuration options
+</Card>
